@@ -2,14 +2,6 @@
 FELIXA AUTOMATED BACKEND
 ========================
 Fully automated community health analysis system.
-
-Flow:
-1. Customer fills form on website
-2. Pays via Stripe
-3. Stripe webhook triggers analysis
-4. Report emailed to customer + play@felixagaming.com
-
-Deploy to: Railway (free tier)
 """
 
 import os
@@ -35,7 +27,6 @@ from openai import OpenAI
 # CONFIGURATION
 # ============================================
 
-# API Keys (set in Railway environment variables)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
@@ -44,9 +35,8 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 
-# Email settings
 ADMIN_EMAIL = "play@felixagaming.com"
-FROM_EMAIL = "Felixa <reports@felixagaming.com>"  # You'll verify this domain in Resend
+FROM_EMAIL = "Felixa <onboarding@resend.dev>"
 
 # Initialize clients
 openai_client = None
@@ -54,7 +44,9 @@ if OPENAI_API_KEY:
     try:
         openai_client = OpenAI(api_key=OPENAI_API_KEY)
     except Exception as e:
-        print(f"OpenAI init error: {e}")stripe.api_key = STRIPE_SECRET_KEY
+        print(f"OpenAI init error: {e}")
+
+stripe.api_key = STRIPE_SECRET_KEY
 resend.api_key = RESEND_API_KEY
 
 thread_pool = ThreadPoolExecutor(max_workers=5)
@@ -74,7 +66,7 @@ app.add_middleware(
 )
 
 # ============================================
-# ATTRIBUTES & CATEGORIES (matches Excel)
+# ATTRIBUTES & CATEGORIES
 # ============================================
 
 ATTRIBUTE_WEIGHTS = {
@@ -94,12 +86,15 @@ CATEGORIES = ["Profanity", "Hate_Speech", "Violence", "Spam"]
 ANALYSIS_PROMPT = """Analyze the following messages for behavioral attributes and content categories.
 
 POSITIVE ATTRIBUTES:
-• Polite: Respectful and courteous • Funny: Light-hearted • Empathetic: Shows care • Encouraging: Supportive
+- Polite: Respectful and courteous
+- Funny: Light-hearted
+- Empathetic: Shows care
+- Encouraging: Supportive
 
 NEGATIVE ATTRIBUTES:
-• Low (-1): Ignorant, Ego-centric, Neurotic
-• Medium (-2): Sarcasm, Agitated  
-• High (-3): Aggressive, Judgmental, Disrespectful, Rude
+- Low (-1): Ignorant, Ego-centric, Neurotic
+- Medium (-2): Sarcasm, Agitated  
+- High (-3): Aggressive, Judgmental, Disrespectful, Rude
 
 CONTENT CATEGORIES:
 1. Profanity: Swear words
@@ -127,7 +122,6 @@ MESSAGES:
 # ============================================
 
 def scrape_youtube(url: str, limit: int = 500) -> List[Dict]:
-    """Scrape YouTube comments"""
     if not YOUTUBE_API_KEY:
         return []
     
@@ -173,7 +167,6 @@ def scrape_youtube(url: str, limit: int = 500) -> List[Dict]:
 
 
 def scrape_reddit(url: str, limit: int = 500) -> List[Dict]:
-    """Scrape Reddit comments"""
     if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
         return []
     
@@ -201,19 +194,12 @@ def scrape_reddit(url: str, limit: int = 500) -> List[Dict]:
 
 
 def scrape_platform(platform: str, url: str, limit: int = 500) -> List[Dict]:
-    """Route to correct scraper"""
     platform = platform.lower()
     
     if platform == "youtube":
         return scrape_youtube(url, limit)
     elif platform == "reddit":
         return scrape_reddit(url, limit)
-    elif platform == "twitch":
-        # Twitch requires more complex setup
-        return []
-    elif platform == "discord":
-        # Discord handled separately via bot
-        return []
     else:
         return []
 
@@ -223,7 +209,6 @@ def scrape_platform(platform: str, url: str, limit: int = 500) -> List[Dict]:
 # ============================================
 
 async def analyze_comments(comments: List[Dict]) -> Dict:
-    """Analyze comments with GPT-4 Mini"""
     if not openai_client or not comments:
         return {"comments": []}
     
@@ -269,7 +254,6 @@ async def analyze_comments(comments: List[Dict]) -> Dict:
 
 
 def calculate_health_score(results: Dict) -> Dict:
-    """Calculate health score from results"""
     comments = results.get("comments", [])
     total = len(comments)
     
@@ -320,25 +304,15 @@ def calculate_health_score(results: Dict) -> Dict:
 # ============================================
 
 def generate_excel(results: Dict, comments: List[Dict], platform: str, source: str) -> bytes:
-    """Generate Excel report and return as bytes"""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
     wb = Workbook()
     
-    # Colors
     PURPLE = "6B4C9A"
     GREEN = "28A745"
     RED = "DC3545"
     WHITE = "FFFFFF"
-    GRAY = "6C757D"
-    
-    border = Border(
-        left=Side(style='thin', color='CCCCCC'),
-        right=Side(style='thin', color='CCCCCC'),
-        top=Side(style='thin', color='CCCCCC'),
-        bottom=Side(style='thin', color='CCCCCC')
-    )
     
     health = calculate_health_score(results)
     
@@ -447,7 +421,6 @@ def generate_excel(results: Dict, comments: List[Dict], platform: str, source: s
     ws4.column_dimensions['B'].width = 60
     ws4.column_dimensions['C'].width = 25
     
-    # Save to bytes
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -458,21 +431,13 @@ def generate_excel(results: Dict, comments: List[Dict], platform: str, source: s
 # EMAIL SENDING
 # ============================================
 
-def send_report_email(
-    customer_email: str,
-    platform: str,
-    source: str,
-    health_score: int,
-    excel_bytes: bytes
-):
-    """Send report to customer and admin"""
-    
+def send_report_email(customer_email: str, platform: str, source: str, health_score: int, excel_bytes: bytes):
     excel_base64 = base64.b64encode(excel_bytes).decode()
     
     html_content = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background: #6B4C9A; padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0;">🩺 Felixa Health Report</h1>
+            <h1 style="color: white; margin: 0;">Felixa Health Report</h1>
         </div>
         
         <div style="padding: 30px; background: #f8f9fa;">
@@ -484,33 +449,20 @@ def send_report_email(
                 <p><strong>Health Score:</strong> <span style="font-size: 24px; color: {'#28A745' if health_score >= 60 else '#DC3545'};">{health_score}/100</span></p>
             </div>
             
-            <p>Your detailed Excel report is attached to this email. It includes:</p>
-            <ul>
-                <li>📊 Dashboard with key metrics</li>
-                <li>📈 Behavioral attributes breakdown</li>
-                <li>⚠️ Content categories analysis</li>
-                <li>🚩 Flagged comments for review</li>
-            </ul>
-            
-            <p style="color: #666; font-size: 14px; margin-top: 30px;">
-                Thank you for using Felixa! If you have questions, reply to this email.
-            </p>
+            <p>Your detailed Excel report is attached.</p>
         </div>
         
         <div style="background: #2D1B4E; padding: 15px; text-align: center;">
-            <p style="color: white; margin: 0; font-size: 12px;">
-                © 2026 Felixa Gaming | www.felixagaming.com
-            </p>
+            <p style="color: white; margin: 0; font-size: 12px;">Felixa Gaming | www.felixagaming.com</p>
         </div>
     </div>
     """
     
     try:
-        # Send to customer
         resend.Emails.send({
             "from": FROM_EMAIL,
             "to": customer_email,
-            "subject": f"🩺 Your Felixa Health Report - Score: {health_score}/100",
+            "subject": f"Your Felixa Health Report - Score: {health_score}/100",
             "html": html_content,
             "attachments": [
                 {
@@ -519,13 +471,12 @@ def send_report_email(
                 }
             ]
         })
-        print(f"✅ Email sent to customer: {customer_email}")
+        print(f"Email sent to: {customer_email}")
         
-        # Send copy to admin
         resend.Emails.send({
             "from": FROM_EMAIL,
             "to": ADMIN_EMAIL,
-            "subject": f"[COPY] Felixa Report for {customer_email} - {platform}",
+            "subject": f"[COPY] Report for {customer_email}",
             "html": f"<p>Copy of report sent to {customer_email}</p>" + html_content,
             "attachments": [
                 {
@@ -534,47 +485,36 @@ def send_report_email(
                 }
             ]
         })
-        print(f"✅ Copy sent to admin: {ADMIN_EMAIL}")
+        print(f"Copy sent to admin")
         
         return True
     except Exception as e:
-        print(f"❌ Email error: {e}")
+        print(f"Email error: {e}")
         return False
 
 
 # ============================================
-# MAIN PROCESSING FUNCTION
+# MAIN PROCESSING
 # ============================================
 
 async def process_order(customer_email: str, platform: str, url: str):
-    """Process a paid order"""
-    print(f"📦 Processing order: {customer_email} | {platform} | {url}")
+    print(f"Processing: {customer_email} | {platform} | {url}")
     
-    # Step 1: Scrape comments
-    print("📥 Scraping comments...")
     comments = scrape_platform(platform, url, limit=500)
     
     if not comments:
-        print("⚠️ No comments found, using sample data")
         comments = [{"text": "Sample comment for testing"}]
     
-    print(f"   Found {len(comments)} comments")
+    print(f"Found {len(comments)} comments")
     
-    # Step 2: Analyze with GPT
-    print("🔍 Analyzing with GPT...")
     results = await analyze_comments(comments)
-    print(f"   Analyzed {len(results.get('comments', []))} comments")
+    print(f"Analyzed {len(results.get('comments', []))} comments")
     
-    # Step 3: Calculate health score
     health = calculate_health_score(results)
-    print(f"   Health Score: {health['health_score']}")
+    print(f"Health Score: {health['health_score']}")
     
-    # Step 4: Generate Excel
-    print("📊 Generating Excel report...")
     excel_bytes = generate_excel(results, comments, platform, url)
     
-    # Step 5: Send email
-    print("📧 Sending email...")
     send_report_email(
         customer_email=customer_email,
         platform=platform,
@@ -583,7 +523,7 @@ async def process_order(customer_email: str, platform: str, url: str):
         excel_bytes=excel_bytes
     )
     
-    print("✅ Order complete!")
+    print("Order complete!")
     return {"status": "success", "health_score": health["health_score"]}
 
 
@@ -593,48 +533,32 @@ async def process_order(customer_email: str, platform: str, url: str):
 
 @app.get("/")
 async def root():
-    return {
-        "service": "Felixa Automated Backend",
-        "status": "running",
-        "endpoints": ["/webhook/stripe", "/test"]
-    }
+    return {"service": "Felixa Automated Backend", "status": "running"}
 
 
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Handle Stripe webhook after payment"""
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
     
     try:
-        # Verify webhook signature
         if STRIPE_WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, STRIPE_WEBHOOK_SECRET
-            )
+            event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
         else:
             event = json.loads(payload)
         
-        # Handle checkout.session.completed
         if event["type"] == "checkout.session.completed":
             session = event["data"]["object"]
             
-            # Extract customer data from metadata
             customer_email = session.get("customer_email") or session.get("customer_details", {}).get("email")
             metadata = session.get("metadata", {})
             
             platform = metadata.get("platform", "youtube")
             url = metadata.get("url", "")
             
-            print(f"💰 Payment received: {customer_email}")
+            print(f"Payment received: {customer_email}")
             
-            # Process in background
-            background_tasks.add_task(
-                process_order,
-                customer_email=customer_email,
-                platform=platform,
-                url=url
-            )
+            background_tasks.add_task(process_order, customer_email, platform, url)
             
             return {"status": "processing"}
         
@@ -646,12 +570,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 
 
 @app.post("/test")
-async def test_analysis(
-    email: str = "test@example.com",
-    platform: str = "youtube",
-    url: str = "https://youtube.com/watch?v=test"
-):
-    """Test endpoint - manually trigger analysis"""
+async def test_analysis(email: str = "test@example.com", platform: str = "youtube", url: str = "https://youtube.com/watch?v=test"):
     result = await process_order(email, platform, url)
     return result
 
@@ -660,7 +579,7 @@ async def test_analysis(
 async def health_check():
     return {
         "status": "healthy",
-        "openai": bool(OPENAI_API_KEY),
+        "openai": bool(openai_client),
         "stripe": bool(STRIPE_SECRET_KEY),
         "resend": bool(RESEND_API_KEY),
         "youtube": bool(YOUTUBE_API_KEY),
@@ -668,12 +587,7 @@ async def health_check():
     }
 
 
-# ============================================
-# RUN SERVER
-# ============================================
-
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    print(f"🚀 Starting Felixa Backend on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
