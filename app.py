@@ -49,8 +49,12 @@ ADMIN_EMAIL = "play@felixagaming.com"
 FROM_EMAIL = "Felixa <reports@felixagaming.com>"  # You'll verify this domain in Resend
 
 # Initialize clients
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-stripe.api_key = STRIPE_SECRET_KEY
+openai_client = None
+if OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    except Exception as e:
+        print(f"OpenAI init error: {e}")stripe.api_key = STRIPE_SECRET_KEY
 resend.api_key = RESEND_API_KEY
 
 thread_pool = ThreadPoolExecutor(max_workers=5)
