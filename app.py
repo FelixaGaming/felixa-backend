@@ -1046,12 +1046,86 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "processing", "payment_id": payment_id}
 
 
-# NO TEST ENDPOINT - Reports can only be triggered via Stripe payment
+def parse_csv_comments(contents: bytes) -> List[Dict]:
+    try:
+        text = contents.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "Please save your CSV as UTF-8.")
+
+    reader = csv.DictReader(StringIO(text), strict=True)
+
+    try:
+        if not reader.fieldnames or "text" not in reader.fieldnames:
+            raise HTTPException(400, "Your CSV needs a column named text.")
+
+        comments = []
+        for row in reader:
+            comment = (row.get("text") or "").strip()
+            if comment:
+                comments.append({"text": comment})
+            if len(comments) >= 500:
+                break
+    except csv.Error:
+        raise HTTPException(400, "The CSV file could not be read.")
+
+    if not comments:
+        raise HTTPException(400, "No comments found in the text column.")
+
+    return comments
+
+
+@app.post("/analyze/csv")
+async def analyze_csv(file: UploadFile = File(...)):
+    from fastapi.responses import HTMLResponse
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(400, "Please upload a .csv file.")
+
+    max_size = 2 * 1024 * 1024
+    try:
+        contents = await file.read(max_size + 1)
+    finally:
+        await file.close()
+
+    if len(contents) > max_size:
+        raise HTTPException(400, "Your CSV must be 2 MB or smaller.")
+
+    comments = parse_csv_comments(contents)
+
+    if not openai_client:
+        raise HTTPException(503, "The analysis service is not configured.")
+
+    results = await analyze_comments(comments)
+
+    if len(results.get("comments", [])) != len(comments):
+        raise HTTPException(
+            502,
+            "Analysis could not finish. Please try again."
+        )
+
+    health = calculate_health_score(results)
+    flagged = get_flagged_comments(results, comments)
+
+    # Treat uploaded comments as text, not HTML.
+    from html import escape
+    for severity in ("high", "medium"):
+        for item in flagged[severity]:
+            item["text"] = escape(item["text"])
+
+    report = generate_html_report(
+        platform="CSV",
+        source="Uploaded CSV",
+        health_score=health["health_score"],
+        health_status=health["health_status"],
+        summary=health["summary"],
+        flagged=flagged
+    )
+
+    return HTMLResponse(content=report)
 
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     print(f"Starting Felixa Backend on port {port}")
-    print("Security: Test endpoint DISABLED - reports require Stripe payment")
     uvicorn.run(app, host="0.0.0.0", port=port)
